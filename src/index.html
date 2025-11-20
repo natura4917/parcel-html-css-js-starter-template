@@ -1,23 +1,203 @@
 <!DOCTYPE html>
-<html lang="en">
-  <head>
+<html lang="ko">
+
+<head>
     <meta charset="UTF-8" />
-    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Parcel HTML, CSS, and JavaScript Starter Template</title>
+    <title>Bithumb Market Order Test</title>
 
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Mulish:wght@400;700&display=swap"
-      rel="stylesheet"
-    />
+    <!-- axios -->
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
 
-    <link rel="stylesheet" href="./styles.css" />
-  </head>
-  <body>
-    <include src="partials/main.html"></include>
+    <!-- uuid -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/uuid/8.3.2/uuid.min.js"></script>
 
-    <script type="module" src="./index.js"></script>
-  </body>
+    <!-- jsrsasign (JWT 생성용) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jsrsasign/10.5.27/jsrsasign-all-min.js"></script>
+</head>
+
+<body>
+    <h2>Bithumb Market BUY Test</h2>
+    
+    <div style="margin-bottom: 20px;">
+        <label style="display: block; margin-bottom: 5px;">Access Key:</label>
+        <input type="text" id="accessKey" style="width: 400px; padding: 5px;" 
+               value="" />
+    </div>
+    
+    <div style="margin-bottom: 20px;">
+        <label style="display: block; margin-bottom: 5px;">Secret Key:</label>
+        <input type="text" id="secretKey" style="width: 400px; padding: 5px;" 
+               value="" />
+    </div>
+    
+    <div style="margin-bottom: 20px;">
+        <label style="display: block; margin-bottom: 5px;">주문 가격 (Price):</label>
+        <input type="number" id="price" style="width: 200px; padding: 5px;" 
+               value="1482" step="1" />
+    </div>
+    
+    <div style="margin-bottom: 20px;">
+        <label style="display: block; margin-bottom: 5px;">주문 수량 (Volume):</label>
+        <input type="number" id="volume" style="width: 200px; padding: 5px;" 
+               value="3.5" step="0.1" />
+    </div>
+      <label>
+    <input type="radio" name="tradeType" id="tradeType" value="bid">
+    매수
+  </label>
+
+  <label>
+    <input type="radio" name="tradeType" id="tradeType" value="ask">
+    매도
+  </label>
+
+    <button id="run">주문 실행</button>
+    
+    <div id="result" style="margin-top: 20px; padding: 10px; border: 1px solid #ddd; display: none;">
+        <h3>체결 결과</h3>
+        <div id="resultContent"></div>
+    </div>
+
+    <script>
+
+        /** ✅ SHA512 HEX 함수 (브라우저용, 빗썸과 100% 동일 출력) */
+        function sha512Hex(str) {
+            const md = new KJUR.crypto.MessageDigest({ alg: "sha512", prov: "cryptojs" });
+            md.updateString(str);
+            return md.digest();  // ✅ 이 값은 HEX 문자열
+        }
+
+        document.getElementById("run").addEventListener("click", () => {
+
+            // ✅ Input 필드에서 값 가져오기
+            const accessKey = document.getElementById("accessKey").value;
+            const secretKey = document.getElementById("secretKey").value;
+            const price = parseFloat(document.getElementById("price").value);
+            const volume = parseFloat(document.getElementById("volume").value);
+	   const side =    document.querySelector('input[name="tradeType"]:checked').value;
+
+
+            // 입력 값 검증
+            if (!accessKey || !secretKey || !price || !volume) {
+                alert("❌ 모든 필드를 입력해주세요!");
+                return;
+            }
+
+            const apiUrl = "https://api.bithumb.com";
+
+            // ✅ 주문 정보
+            const requestBody = {
+                market: "KRW-USDT",
+                side: side,
+                volume: volume,
+                price: price,
+                ord_type: "limit"
+            };
+
+            // ✅ 1) querystring 생성
+            const queryString = Object.entries(requestBody)
+                .map(([k, v]) => `${k}=${v}`)
+                .join("&");
+
+            // ✅ 2) SHA512 HEX 해시 생성
+            const queryHash = sha512Hex(queryString);
+
+            // ✅ 3) JWT Payload
+            const payload = {
+                access_key: accessKey,
+                nonce: uuid.v4(),
+                timestamp: Date.now(),
+                query_hash: queryHash,
+                query_hash_alg: "SHA512"
+            };
+
+            // ✅ JWT header
+            const header = { alg: "HS256", typ: "JWT" };
+
+            // ✅ 4) JWT 생성
+            const jwtToken = KJUR.jws.JWS.sign(
+                "HS256",
+                JSON.stringify(header),
+                JSON.stringify(payload),
+                secretKey
+            );
+
+            // ✅ 5) axios 요청 헤더
+            const config = {
+                headers: {
+                    "Content-Type": "application/json",
+                    "Authorization": `Bearer ${jwtToken}`
+                }
+            };
+
+            // ✅ API 요청
+            axios.post(`${apiUrl}/v1/orders`, requestBody, config)
+                .then(res => {
+                    console.log("✅ Status:", res.status);
+                    console.log("✅ Data:", res.data);
+                    
+                    // 체결 결과 표시
+                    const resultDiv = document.getElementById("result");
+                    const resultContent = document.getElementById("resultContent");
+                    
+                    let resultHTML = `
+                        <p><strong>주문 상태:</strong> 성공 ✅</p>
+                        <p><strong>주문 ID:</strong> ${res.data.uuid || 'N/A'}</p>
+                        <p><strong>마켓:</strong> ${res.data.market || 'N/A'}</p>
+                        <p><strong>주문 유형:</strong> ${res.data.side === 'bid' ? '매수' : '매도'}</p>
+                        <p><strong>주문 가격:</strong> ${res.data.price ? res.data.price.toLocaleString() : 'N/A'} KRW</p>
+                        <p><strong>주문 수량:</strong> ${res.data.volume || 'N/A'}</p>
+                    `;
+                    
+                    // 체결 정보가 있는 경우
+                    if (res.data.trades && res.data.trades.length > 0) {
+                        resultHTML += `<hr style="margin: 10px 0;">`;
+                        resultHTML += `<p><strong style="color: green;">✅ 체결 완료!</strong></p>`;
+                        res.data.trades.forEach((trade, index) => {
+                            resultHTML += `
+                                <p><strong>체결 ${index + 1}:</strong></p>
+                                <p style="margin-left: 20px;">- 체결 가격: <strong style="color: green;">${trade.price ? parseFloat(trade.price).toLocaleString() : 'N/A'} KRW</strong></p>
+                                <p style="margin-left: 20px;">- 체결 수량: ${trade.volume || 'N/A'}</p>
+                            `;
+                        });
+                    } else if (res.data.state === 'done') {
+                        resultHTML += `<hr style="margin: 10px 0;">`;
+                        resultHTML += `<p><strong style="color: green;">✅ 체결 완료!</strong></p>`;
+                        resultHTML += `<p>체결 가격: <strong style="color: green;">${res.data.avg_price ? parseFloat(res.data.avg_price).toLocaleString() : res.data.price.toLocaleString()} KRW</strong></p>`;
+                    } else {
+                        resultHTML += `<hr style="margin: 10px 0;">`;
+                        resultHTML += `<p><strong style="color: orange;">⏳ 주문 대기 중...</strong></p>`;
+                        resultHTML += `<p>주문 상태: ${res.data.state || 'N/A'}</p>`;
+                    }
+                    
+                    resultContent.innerHTML = resultHTML;
+                    resultDiv.style.display = "block";
+                    
+                    alert("✅ 주문 성공! 하단에 결과를 확인하세요.");
+                })
+                .catch(err => {
+                    console.error("❌ Status:", err.response?.status);
+                    console.error("❌ Data:", err.response?.data);
+                    
+                    // 에러 결과 표시
+                    const resultDiv = document.getElementById("result");
+                    const resultContent = document.getElementById("resultContent");
+                    
+                    let errorHTML = `
+                        <p><strong style="color: red;">주문 실패 ❌</strong></p>
+                        <p><strong>에러 코드:</strong> ${err.response?.status || 'N/A'}</p>
+                        <p><strong>에러 메시지:</strong> ${err.response?.data?.error?.message || err.message || 'N/A'}</p>
+                    `;
+                    
+                    resultContent.innerHTML = errorHTML;
+                    resultDiv.style.display = "block";
+                    resultDiv.style.borderColor = "#ff0000";
+                    
+                    alert("❌ 주문 실패! 하단에 에러 내용을 확인하세요.");
+                });
+        });
+    </script>
+</body>
+
 </html>
